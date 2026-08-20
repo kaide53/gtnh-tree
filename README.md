@@ -75,12 +75,3 @@ cp build/libs/gtnhtreeexport-1.0.0.jar ../server/public/gtnhtreeexport.jar   # �
 
 > 依赖：GTNH 版 NotEnoughItems（`com.github.GTNewHorizons:NotEnoughItems`，见 `dependencies.gradle`）。
 
-## 常见问题
-
-- **为什么之前要退出世界才能导出新书签？** 旧版本有这个问题，现已修复：导出前会调用 NEI 的 `bookmarkPanel.save()` 把内存里最新书签刷盘。
-- **端口**：服务器用冷门端口更安全（如 45213），别用 80/443。
-- **域名多服务器**：DNS 只映射域名→IP，无法按端口分流到不同机器；多台机器请用子域名。
-
-## 许可
-
-MIT License（见 LICENSE）。
