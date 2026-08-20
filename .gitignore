@@ -1,0 +1,24 @@
+# macOS
+.DS_Store
+
+# Gradle 构建产物
+mod/build/
+mod/.gradle/
+mod/run/
+mod/*.log
+
+# 本地离线查看器生成的临时数据（由 tools 脚本从游戏书签导出，不属于源码）
+web/tree.json
+web/tree-data.js
+web/icons/
+
+# 服务器运行时数据（各玩家上传的树 / 勾选状态）
+server/data/
+
+# 项目根目录的冗余 jar（正式供网页下载的 jar 在 server/public/ 下）
+gtnhtreeexport-*.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/

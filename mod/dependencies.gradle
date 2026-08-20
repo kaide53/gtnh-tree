@@ -1,0 +1,17 @@
+/*
+ * Add your dependencies here. Supported configurations:
+ *  - api("group:name:version:classifier")
+ *  - implementation("g:n:v:c")
+ *  - compileOnly("g:n:v:c"): only visible at compiletime, not needed at runtime
+ *  - compileOnlyApi("g:n:v:c")
+ *  - runtimeOnlyNonPublishable("g:n:v:c")
+ *  - devOnlyNonPublishable("g:n:v:c")
+ *  - runtimeOnly("g:n:v:c")
+ *  - annotationProcessor("g:n:v:c")
+ *
+ * For more details, see https://docs.gradle.org/8.0.1/userguide/java_library_plugin.html
+ */
+dependencies {
+    // NEI 只参与编译，运行时由整合包自带。
+    compileOnly("com.github.GTNewHorizons:NotEnoughItems:2.8.101-GTNH:dev")
+}

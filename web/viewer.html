@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GTNH 合成树</title>
+<style>
+  :root {
+    --bg: #101418;
+    --panel: #171d24;
+    --panel2: #1e2630;
+    --border: #2a3440;
+    --text: #dbe4ee;
+    --muted: #8aa0b5;
+    --accent: #4fc3f7;
+    --leaf: #a7c8a0;
+    --warn: #e6b455;
+    --line: #33404f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", Roboto, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  header {
+    position: sticky; top: 0; z-index: 10;
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    padding: 12px 18px;
+    background: linear-gradient(180deg, #141a21, #101418);
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .5px; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  header .spacer { flex: 1; }
+  button, .btn {
+    background: var(--panel2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 12px; cursor: pointer; font-size: 13px;
+  }
+  button:hover { border-color: var(--accent); color: #fff; }
+  .dropzone { display: none; }
+  #wrap { max-width: 980px; margin: 0 auto; padding: 18px; }
+  .stat { color: var(--muted); font-size: 12px; margin: 0 0 14px; }
+  .meta { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+  .meta b { color: var(--text); font-weight: 600; }
+
+  .tree { margin-left: 0; }
+  .node { margin: 2px 0; }
+  .node-row {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 7px 10px; border-radius: 8px;
+    background: var(--panel); border: 1px solid var(--border);
+  }
+  .node-row:hover { border-color: #3d4d5e; }
+  .toggle {
+    flex: 0 0 18px; height: 18px; margin-top: 1px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border); border-radius: 4px; cursor: pointer;
+    color: var(--muted); user-select: none; font-size: 12px; line-height: 1;
+  }
+  .toggle.empty { cursor: default; }
+  .body { flex: 1; min-width: 0; }
+  .name { font-weight: 600; word-break: break-all; }
+  .name .fallback { color: var(--muted); font-weight: 500; }
+  .item-icon { display: inline-block; width: 20px; height: 20px; margin-right: 7px;
+    vertical-align: -4px; image-rendering: pixelated; image-rendering: crisp-edges; }
+  .item-icon.ph { display: inline-block; background: var(--panel2);
+    border: 1px solid var(--border); border-radius: 3px; box-sizing: border-box; }
+  .check { flex: 0 0 auto; margin-left: auto; align-self: center; cursor: pointer;
+    font-size: 16px; line-height: 1; color: var(--muted); user-select: none; padding: 0 2px; }
+  .check.done { color: #22c55e; }
+  .node-row.done .item-name { color: #22c55e; }
+  .machine {
+    display: inline-block; margin-left: 8px; padding: 1px 8px;
+    font-size: 11px; color: var(--accent);
+    background: rgba(79,195,247,.08); border: 1px solid rgba(79,195,247,.25);
+    border-radius: 999px; vertical-align: 2px;
+  }
+  .amounts { margin-top: 3px; font-size: 12px; color: var(--muted); }
+  .amounts .need { color: var(--warn); font-weight: 600; }
+  .amounts .leaf-note { color: var(--leaf); }
+  .amounts .leftover { color: #7f9dbb; }
+  .children { margin-left: 22px; padding-left: 12px; border-left: 1px solid var(--line); }
+  .hidden { display: none; }
+  #drop.hint {
+    margin: 30px auto; max-width: 560px; text-align: center;
+    padding: 40px 20px; border: 2px dashed var(--border); border-radius: 12px; color: var(--muted);
+  }
+  #drop.hint strong { color: var(--text); display: block; margin-bottom: 6px; }
+  .foot { color: var(--muted); font-size: 12px; margin-top: 26px; padding-top: 12px; border-top: 1px solid var(--border); }
+</style>
+</head>
+<body>
+<header>
+  <h1>GTNH 合成树</h1>
+  <span class="sub" id="subtitle">数据源：bookmarks.ini（预览版）</span>
+  <span class="spacer"></span>
+  <button id="expandAll">全部展开</button>
+  <button id="collapseAll">全部折叠</button>
+  <button id="openFile">打开 JSON…</button>
+</header>
+<input type="file" id="fileInput" accept=".json,application/json" style="display:none">
+
+<div id="wrap">
+  <div id="drop" class="hint" style="display:none">
+    <strong>把导出的 tree.json 拖到这里</strong>
+    或点右上角「打开 JSON…」选择文件
+  </div>
+  <div id="meta" class="meta"></div>
+  <div id="stat" class="stat"></div>
+  <div id="tree"></div>
+  <div class="foot">
+    预览版说明：数量 = 运行次数(向上取整) × 每次消耗；尚未计入容器物品/流体/概率副产物/循环依赖，精确数值以游戏内导出模组为准。
+  </div>
+</div>
+
+<script src="tree-data.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var state = { data: null, collapsed: {} };
+
+  // 完成勾选状态（本地浏览器记忆，按物品 id 存 localStorage）
+  function checkDone(id) {
+    try { return localStorage.getItem("gtnh-check:local:" + id) === "1"; } catch (e) { return false; }
+  }
+  function setDone(id, done) {
+    try { localStorage.setItem("gtnh-check:local:" + id, done ? "1" : "0"); } catch (e) {}
+  }
+
+  var HANDLER_NAMES = {
+    "codechicken.nei.recipe.ShapedRecipeHandler": "工作台 · 有序合成",
+    "codechicken.nei.recipe.ShapelessRecipeHandler": "工作台 · 无序合成",
+    "codechicken.nei.recipe.FurnaceRecipeHandler": "熔炉 · 烧制",
+    "gt.recipe.compressor": "GT 压缩机",
+    "gt.recipe.category.macerator_recycling": "GT 研磨机 · 回收",
+    "gt.recipe.macerator": "GT 研磨机",
+    "gt.recipe.centrifuge": "GT 离心机",
+    "gt.recipe.electrolyzer": "GT 电解机",
+    "gt.recipe.assembler": "GT 组装机",
+    "gt.recipe.chemical_reactor": "GT 化学反应釜",
+    "gt.recipe.blast_furnace": "GT 高炉",
+    "gt.recipe.alloy_smelter": "GT 合金炉",
+    "gt.recipe.extractor": "GT 提取机",
+    "gt.recipe.mixer": "GT 搅拌机",
+    "gt.recipe.wiremill": "GT 线材轧机",
+    "gt.recipe.bender": "GT 折弯机",
+    "gt.recipe.lathe": "GT 车床",
+    "gt.recipe.cutter": "GT 切割机",
+    "gt.recipe.sifter": "GT 筛选机"
+  };
+
+  function friendlyMachine(recipe) {
+    if (!recipe) return "";
+    if (recipe.machine && recipe.machine !== recipe.handler) return recipe.machine;
+    var h = recipe.handler || "";
+    if (HANDLER_NAMES[h]) return HANDLER_NAMES[h];
+    if (h.indexOf("gt.recipe.") === 0) return "GT 机器 · " + h.slice(10);
+    if (h.indexOf("codechicken.nei.recipe.") === 0) return h.slice(24);
+    return h;
+  }
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  function renderIcon(node) {
+    if (node.icon) {
+      var img = document.createElement("img");
+      img.className = "item-icon";
+      img.src = node.icon;
+      img.alt = "";
+      img.onerror = function () {
+        var ph = document.createElement("span");
+        ph.className = "item-icon ph";
+        if (img.parentNode) img.parentNode.replaceChild(ph, img);
+      };
+      return img;
+    }
+    var ph = document.createElement("span");
+    ph.className = "item-icon ph";
+    return ph;
+  }
+
+  function isLeaf(node) { return !node.recipe || !node.children.length; }
+
+  function renderAmounts(node) {
+    var div = el("div", "amounts");
+    var parts = [];
+    parts.push("需要 " + node.amount + " 个");
+    if (node.perCraft != null && node.perCraft !== 1) parts.push("每次消耗 ×" + node.perCraft);
+    if (node.recipe) {
+      if (node.produces !== 1) parts.push("单次产出 ×" + node.produces);
+      if (node.runs > 1 && node.produces !== 1) parts.push("需运行 " + node.runs + " 次");
+      if (node.leftover > 0) parts.push("(余 " + node.leftover + ")");
+    }
+    if (node.missing > 0) parts.push("⚠ 还有 " + node.missing + " 格原料未记录");
+    div.appendChild(el("span", "need", parts[0]));
+    for (var i = 1; i < parts.length; i++) {
+      div.appendChild(document.createTextNode(" · "));
+      var span = el("span", "amounts-extra", parts[i]);
+      if (parts[i].indexOf("未记录") >= 0) span.style.color = "#e08080";
+      div.appendChild(span);
+    }
+    if (isLeaf(node)) {
+      div.appendChild(document.createTextNode(" · "));
+      div.appendChild(el("span", "leaf-note", "采集 / 已有"));
+    }
+    return div;
+  }
+
+  function renderNode(node) {
+    var wrap = el("div", "node" + (isLeaf(node) ? " leaf" : ""));
+    var row = el("div", "node-row");
+
+    var hasChildren = node.children && node.children.length > 0;
+    var toggle = el("span", "toggle" + (hasChildren ? "" : " empty"), hasChildren ? "▾" : "·");
+    var isCollapsed = !!state.collapsed[node.id + "@" + node.amount];
+    if (hasChildren) {
+      toggle.textContent = isCollapsed ? "▸" : "▾";
+      toggle.addEventListener("click", function () {
+        state.collapsed[node.id + "@" + node.amount] = !state.collapsed[node.id + "@" + node.amount];
+        render();
+      });
+    }
+
+    var body = el("div", "body");
+    var nameLine = el("div", "name");
+    nameLine.appendChild(renderIcon(node));
+    var nameSpan = el("span", "item-name", node.name || node.id);
+    nameSpan.title = node.id;
+    nameLine.appendChild(nameSpan);
+    if (node.recipe) {
+      var m = friendlyMachine(node.recipe);
+      if (m) nameLine.appendChild(el("span", "machine", m));
+    }
+    body.appendChild(nameLine);
+    body.appendChild(renderAmounts(node));
+
+    // 完成勾选框（右侧）
+    var done = checkDone(node.id);
+    var check = el("span", "check" + (done ? " done" : ""), done ? "✅" : "□");
+    check.title = "标记完成";
+    check.addEventListener("click", function () {
+      var d = !checkDone(node.id);
+      setDone(node.id, d);
+      check.textContent = d ? "✅" : "□";
+      check.classList.toggle("done", d);
+      row.classList.toggle("done", d);
+      updateStat();
+    });
+    if (done) row.classList.add("done");
+
+    row.appendChild(toggle);
+    row.appendChild(body);
+    row.appendChild(check);
+    wrap.appendChild(row);
+
+    if (hasChildren) {
+      var kids = el("div", "children");
+      node.children.forEach(function (c) { kids.appendChild(renderNode(c)); });
+      if (isCollapsed) kids.classList.add("hidden");
+      wrap.appendChild(kids);
+    }
+    return wrap;
+  }
+
+  function render() {
+    var treeEl = document.getElementById("tree");
+    treeEl.innerHTML = "";
+    var metaEl = document.getElementById("meta");
+    var statEl = document.getElementById("stat");
+    var dropEl = document.getElementById("drop");
+    var subEl = document.getElementById("subtitle");
+
+    if (!state.data || !state.data.roots || !state.data.roots.length) {
+      treeEl.innerHTML = "";
+      metaEl.innerHTML = "";
+      statEl.innerHTML = "";
+      dropEl.style.display = "block";
+      return;
+    }
+    dropEl.style.display = "none";
+
+    var d = state.data;
+    var meta = [];
+    meta.push("<b>" + d.roots.length + "</b> 个目标");
+    if (d.exportedAt) meta.push("导出时间 " + d.exportedAt.replace("T", " ").slice(0, 19));
+    if (d.source) meta.push("来源 " + d.source);
+    metaEl.innerHTML = meta.join(" · ");
+
+    updateStat();
+    subEl.textContent = "数据源：" + (d.source || "JSON");
+
+    d.roots.forEach(function (r) { treeEl.appendChild(renderNode(r)); });
+  }
+
+  function countNodes(roots) {
+    var n = 0;
+    (function walk(list) {
+      list.forEach(function (x) { n++; if (x.children) walk(x.children); });
+    })(roots);
+    return n;
+  }
+
+  function countDone(roots) {
+    var n = 0;
+    (function walk(list) {
+      list.forEach(function (x) { if (checkDone(x.id)) n++; if (x.children) walk(x.children); });
+    })(roots);
+    return n;
+  }
+
+  function updateStat() {
+    if (!state.data || !state.data.roots) return;
+    var total = countNodes(state.data.roots);
+    var done = countDone(state.data.roots);
+    document.getElementById("stat").textContent = "共 " + total + " 个节点 · 已完成 " + done;
+  }
+
+  function loadData(obj) {
+    if (obj && typeof obj === "object" && obj.roots) {
+      state.data = obj;
+      state.collapsed = {};
+      render();
+    } else {
+      alert("这不是有效的合成树 JSON（缺少 roots 字段）");
+    }
+  }
+
+  // 1) 双击打开时：tree-data.js 内嵌的数据
+  if (window.TREE_DATA) loadData(window.TREE_DATA);
+
+  // 2) 通过 http 提供时：自动拉取 tree.json
+  if (!state.data) {
+    fetch("tree.json")
+      .then(function (r) { if (r.ok) return r.json(); throw new Error("no tree.json"); })
+      .then(loadData)
+      .catch(function () { render(); });
+  }
+
+  // 3) 拖拽 / 文件选择
+  var fileInput = document.getElementById("fileInput");
+  document.getElementById("openFile").addEventListener("click", function () { fileInput.click(); });
+  fileInput.addEventListener("change", function () {
+    var f = fileInput.files && fileInput.files[0];
+    if (f) readFile(f);
+    fileInput.value = "";
+  });
+
+  var dropEl = document.getElementById("drop");
+  ["dragenter", "dragover"].forEach(function (ev) {
+    dropEl.addEventListener(ev, function (e) { e.preventDefault(); dropEl.style.borderColor = "#4fc3f7"; });
+  });
+  ["dragleave", "drop"].forEach(function (ev) {
+    dropEl.addEventListener(ev, function (e) { e.preventDefault(); dropEl.style.borderColor = ""; });
+  });
+  dropEl.addEventListener("drop", function (e) {
+    var f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) readFile(f);
+  });
+
+  function readFile(f) {
+    var reader = new FileReader();
+    reader.onload = function () {
+      try { loadData(JSON.parse(reader.result)); }
+      catch (err) { alert("解析 JSON 失败：" + err.message); }
+    };
+    reader.readAsText(f, "utf-8");
+  }
+
+  document.getElementById("expandAll").addEventListener("click", function () {
+    state.collapsed = {}; render();
+  });
+  document.getElementById("collapseAll").addEventListener("click", function () {
+    collapseAll(state.data && state.data.roots); render();
+  });
+  function collapseAll(roots) {
+    if (!roots) return;
+    roots.forEach(function (n) {
+      if (n.children && n.children.length) {
+        state.collapsed[n.id + "@" + n.amount] = true;
+        collapseAll(n.children);
+      }
+    });
+  }
+
+  if (!state.data) render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+{
+	"modListVersion": 2,
+	"modList": [{
+		"modid": "${modId}",
+		"name": "${modName}",
+		"description": "Export NEI bookmark recipe chains to dumps/tree.json for the GTNH crafting-tree web viewer. Type /treeexport in game.",
+		"version": "${modVersion}",
+		"mcversion": "${minecraftVersion}",
+		"url": "",
+		"updateUrl": "",
+		"authorList": ["you"],
+		"credits": "Built on GTNewHorizons NotEnoughItems RecipeChainMath",
+		"logoFile": "",
+		"screenshots": [],
+		"parent": "",
+		"requiredMods": [],
+		"dependencies": ["NotEnoughItems"],
+		"dependants": [],
+		"useDependencyInformation": false
+	}]
+}

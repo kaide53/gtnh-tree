@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GTNH 合成树 · 多人共享</title>
+<style>
+  :root {
+    --bg: #101418; --panel: #171d24; --panel2: #1e2630; --border: #2a3440;
+    --text: #dbe4ee; --muted: #8aa0b5; --accent: #4fc3f7; --leaf: #a7c8a0;
+    --warn: #e6b455; --line: #33404f;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", Roboto, sans-serif;
+    font-size: 14px; line-height: 1.5; }
+  header { position: sticky; top: 0; z-index: 10; padding: 12px 18px;
+    background: linear-gradient(180deg, #141a21, #101418); border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 16px; margin: 0 0 10px; font-weight: 600; }
+  #tabs { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .download { position: absolute; top: 12px; right: 18px; color: var(--accent);
+    font-size: 13px; text-decoration: none; padding: 5px 12px;
+    border: 1px solid rgba(79,195,247,.4); border-radius: 6px; }
+  .download:hover { background: rgba(79,195,247,.12); color: #fff; }
+  .tab { padding: 5px 14px; border: 1px solid var(--border); border-radius: 999px;
+    cursor: pointer; color: var(--muted); font-size: 13px; user-select: none; }
+  .tab:hover { border-color: var(--accent); color: #fff; }
+  .tab.active { background: var(--accent); border-color: var(--accent); color: #0a0e12; font-weight: 600; }
+  button { background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 12px; cursor: pointer; font-size: 13px; }
+  button:hover { border-color: var(--accent); }
+  #wrap { max-width: 980px; margin: 0 auto; padding: 18px; }
+  .meta { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+  .stat { color: var(--muted); font-size: 12px; margin: 0 0 14px; }
+  .empty { color: var(--muted); text-align: center; padding: 60px 20px; }
+
+  .node { margin: 2px 0; }
+  .node-row { display: flex; align-items: flex-start; gap: 8px; padding: 7px 10px;
+    border-radius: 8px; background: var(--panel); border: 1px solid var(--border); }
+  .node-row:hover { border-color: #3d4d5e; }
+  .toggle { flex: 0 0 18px; width: 18px; height: 18px; margin-top: 1px; display: inline-flex;
+    align-items: center; justify-content: center; border: 1px solid var(--border);
+    border-radius: 4px; cursor: pointer; color: var(--muted); user-select: none;
+    font-size: 12px; line-height: 1; }
+  .toggle.empty { cursor: default; }
+  .body { flex: 1; min-width: 0; }
+  .name { font-weight: 600; word-break: break-all; }
+  .name .fallback { color: var(--muted); font-weight: 500; }
+  .item-icon { display: inline-block; width: 20px; height: 20px; margin-right: 7px;
+    vertical-align: -4px; image-rendering: pixelated; image-rendering: crisp-edges; }
+  .check { flex: 0 0 auto; margin-left: auto; align-self: center; cursor: pointer;
+    font-size: 16px; line-height: 1; color: var(--muted); user-select: none; padding: 0 2px; }
+  .check.done { color: #22c55e; }
+  .node-row.done .item-name { color: #22c55e; }
+  .machine { display: inline-block; margin-left: 8px; padding: 1px 8px; font-size: 11px;
+    color: var(--accent); background: rgba(79,195,247,.08);
+    border: 1px solid rgba(79,195,247,.25); border-radius: 999px; vertical-align: 2px; }
+  .amounts { margin-top: 3px; font-size: 12px; color: var(--muted); }
+  .amounts .need { color: var(--warn); font-weight: 600; }
+  .amounts .leaf-note { color: var(--leaf); }
+  .children { margin-left: 22px; padding-left: 12px; border-left: 1px solid var(--line); }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>GTNH 合成树 · 多人共享</h1>
+  <a class="download" href="gtnhtreeexport.jar" download title="下载导出模组（放进整合包 mods 文件夹）">⬇ 下载模组</a>
+  <div id="tabs">
+    <span id="tabHint" style="color:var(--muted); font-size:13px;">加载玩家中…</span>
+  </div>
+</header>
+
+<div id="wrap">
+  <div id="meta" class="meta"></div>
+  <div id="stat" class="stat"></div>
+  <div id="tree"></div>
+  <div id="empty" class="empty" style="display:none">还没有任何玩家上传数据。</div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var state = { players: [], current: null, tree: null, collapsed: {}, checks: {} };
+
+  // 完成勾选状态：以服务器为准（存 data/<player>-checks.json），本地 localStorage 做离线缓存
+  function checkDone(id) {
+    if (state.checks && id in state.checks) return !!state.checks[id];
+    try {
+      return localStorage.getItem("gtnh-check:" + (state.current || "_") + ":" + id) === "1";
+    } catch (e) { return false; }
+  }
+  function setDone(id, done) {
+    state.checks[id] = done;
+    var p = state.current || "_";
+    try {
+      localStorage.setItem("gtnh-check:" + p + ":" + id, done ? "1" : "0");
+    } catch (e) {}
+    // 上传到服务器，让其他人也能看到
+    fetch("/api/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ player: state.current, id: id, done: done })
+    }).catch(function () {});
+  }
+
+  function loadChecks(player) {
+    if (!player) return;
+    fetch("/api/checks?player=" + encodeURIComponent(player))
+      .then(function (r) { if (r.ok) return r.json(); throw new Error("load checks failed"); })
+      .then(function (d) {
+        var next = d.checks || {};
+        if (JSON.stringify(next) !== JSON.stringify(state.checks)) {
+          state.checks = next;
+          renderTree();
+        }
+      })
+      .catch(function () {});
+  }
+
+  var HANDLER_NAMES = {
+    "codechicken.nei.recipe.ShapedRecipeHandler": "工作台 · 有序合成",
+    "codechicken.nei.recipe.ShapelessRecipeHandler": "工作台 · 无序合成",
+    "codechicken.nei.recipe.FurnaceRecipeHandler": "熔炉 · 烧制",
+    "gt.recipe.compressor": "GT 压缩机",
+    "gt.recipe.category.macerator_recycling": "GT 研磨机 · 回收",
+    "gt.recipe.macerator": "GT 研磨机",
+    "gt.recipe.centrifuge": "GT 离心机",
+    "gt.recipe.electrolyzer": "GT 电解机",
+    "gt.recipe.assembler": "GT 组装机",
+    "gt.recipe.chemical_reactor": "GT 化学反应釜",
+    "gt.recipe.blast_furnace": "GT 高炉",
+    "gt.recipe.alloy_smelter": "GT 合金炉",
+    "gt.recipe.extractor": "GT 提取机",
+    "gt.recipe.mixer": "GT 搅拌机",
+    "gt.recipe.wiremill": "GT 线材轧机",
+    "gt.recipe.bender": "GT 折弯机",
+    "gt.recipe.lathe": "GT 车床",
+    "gt.recipe.cutter": "GT 切割机",
+    "gt.recipe.sifter": "GT 筛选机"
+  };
+
+  function friendlyMachine(recipe) {
+    if (!recipe) return "";
+    if (recipe.machine && recipe.machine !== recipe.handler) return recipe.machine;
+    var h = recipe.handler || "";
+    if (HANDLER_NAMES[h]) return HANDLER_NAMES[h];
+    if (h.indexOf("gt.recipe.") === 0) return "GT 机器 · " + h.slice(10);
+    if (h.indexOf("codechicken.nei.recipe.") === 0) return h.slice(24);
+    return h;
+  }
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  function renderIcon(node) {
+    if (node.icon) {
+      var img = document.createElement("img");
+      img.className = "item-icon";
+      img.src = node.icon;
+      img.alt = "";
+      return img;
+    }
+    return el("span", "item-icon", "");
+  }
+
+  function isLeaf(node) { return !node.recipe || !node.children.length; }
+
+  function renderAmounts(node) {
+    var div = el("div", "amounts");
+    var parts = [];
+    parts.push("需要 " + node.amount + " 个");
+    if (node.perCraft != null && node.perCraft !== 1) parts.push("每次消耗 ×" + node.perCraft);
+    if (node.recipe) {
+      if (node.produces !== 1) parts.push("单次产出 ×" + node.produces);
+      if (node.runs > 1 && node.produces !== 1) parts.push("需运行 " + node.runs + " 次");
+      if (node.leftover > 0) parts.push("(余 " + node.leftover + ")");
+    }
+    if (node.missing > 0) parts.push("⚠ 还有 " + node.missing + " 格原料未记录");
+    div.appendChild(el("span", "need", parts[0]));
+    for (var i = 1; i < parts.length; i++) {
+      div.appendChild(document.createTextNode(" · "));
+      var span = el("span", "amounts-extra", parts[i]);
+      if (parts[i].indexOf("未记录") >= 0) span.style.color = "#e08080";
+      div.appendChild(span);
+    }
+    if (isLeaf(node)) {
+      div.appendChild(document.createTextNode(" · "));
+      div.appendChild(el("span", "leaf-note", "采集 / 已有"));
+    }
+    return div;
+  }
+
+  function renderNode(node) {
+    var wrap = el("div", "node" + (isLeaf(node) ? " leaf" : ""));
+    var row = el("div", "node-row");
+
+    var hasChildren = node.children && node.children.length > 0;
+    var key = node.id + "@" + node.amount;
+    var toggle = el("span", "toggle" + (hasChildren ? "" : " empty"), hasChildren ? "▾" : "·");
+    if (hasChildren) {
+      toggle.textContent = state.collapsed[key] ? "▸" : "▾";
+      toggle.addEventListener("click", function () {
+        state.collapsed[key] = !state.collapsed[key];
+        renderTree();
+      });
+    }
+
+    var body = el("div", "body");
+    var nameLine = el("div", "name");
+    nameLine.appendChild(renderIcon(node));
+    var nameSpan = el("span", "item-name", node.name || node.id);
+    nameSpan.title = node.id;
+    nameLine.appendChild(nameSpan);
+    if (node.recipe) {
+      var m = friendlyMachine(node.recipe);
+      if (m) nameLine.appendChild(el("span", "machine", m));
+    }
+    body.appendChild(nameLine);
+    body.appendChild(renderAmounts(node));
+
+    // 完成勾选框（右侧）
+    var done = checkDone(node.id);
+    var check = el("span", "check" + (done ? " done" : ""), done ? "✅" : "□");
+    check.title = "标记完成";
+    check.addEventListener("click", function () {
+      var d = !checkDone(node.id);
+      setDone(node.id, d);
+      check.textContent = d ? "✅" : "□";
+      check.classList.toggle("done", d);
+      row.classList.toggle("done", d);
+      updateStat();
+    });
+    if (done) row.classList.add("done");
+
+    row.appendChild(toggle);
+    row.appendChild(body);
+    row.appendChild(check);
+    wrap.appendChild(row);
+
+    if (hasChildren) {
+      var kids = el("div", "children");
+      node.children.forEach(function (c) { kids.appendChild(renderNode(c)); });
+      if (state.collapsed[key]) kids.classList.add("hidden");
+      wrap.appendChild(kids);
+    }
+    return wrap;
+  }
+
+  function renderTree() {
+    var treeEl = document.getElementById("tree");
+    var metaEl = document.getElementById("meta");
+    var statEl = document.getElementById("stat");
+    var emptyEl = document.getElementById("empty");
+    treeEl.innerHTML = "";
+    metaEl.innerHTML = "";
+    statEl.innerHTML = "";
+
+    if (!state.tree || !state.tree.roots || !state.tree.roots.length) {
+      emptyEl.style.display = "block";
+      return;
+    }
+    emptyEl.style.display = "none";
+
+    metaEl.innerHTML = "玩家 <b>" + (state.current || "") + "</b> · "
+      + state.tree.roots.length + " 个目标"
+      + (state.tree.exportedAt ? " · 上传时间 " + state.tree.exportedAt.replace("T", " ").slice(0, 19) : "");
+    updateStat();
+    state.tree.roots.forEach(function (r) { treeEl.appendChild(renderNode(r)); });
+  }
+
+  function countNodes(roots) {
+    var n = 0;
+    (function walk(list) { list.forEach(function (x) { n++; if (x.children) walk(x.children); }); })(roots);
+    return n;
+  }
+
+  function countDone(roots) {
+    var n = 0;
+    (function walk(list) { list.forEach(function (x) { if (checkDone(x.id)) n++; if (x.children) walk(x.children); }); })(roots);
+    return n;
+  }
+
+  function updateStat() {
+    if (!state.tree || !state.tree.roots) return;
+    var total = countNodes(state.tree.roots);
+    var done = countDone(state.tree.roots);
+    document.getElementById("stat").textContent = "共 " + total + " 个节点 · 已完成 " + done;
+  }
+
+  function renderTabs() {
+    var tabs = document.getElementById("tabs");
+    tabs.innerHTML = "";
+    if (!state.players.length) {
+      tabs.appendChild(el("span", null, "还没有玩家上传数据。"));
+      return;
+    }
+    state.players.forEach(function (p) {
+      var t = el("span", "tab" + (p === state.current ? " active" : ""), p);
+      t.addEventListener("click", function () { selectPlayer(p); });
+      tabs.appendChild(t);
+    });
+    var refresh = document.createElement("button");
+    refresh.textContent = "刷新";
+    refresh.style.marginLeft = "4px";
+    refresh.addEventListener("click", loadPlayers);
+    tabs.appendChild(refresh);
+  }
+
+  var es = null; // SSE 连接（服务器主动推送勾选变化）
+
+  function openEvents(player) {
+    if (es) { es.close(); es = null; }
+    if (!player) return;
+    try {
+      es = new EventSource("/api/events?player=" + encodeURIComponent(player));
+      es.onmessage = function (ev) {
+        try {
+          var d = JSON.parse(ev.data);
+          if (d && d.checks && JSON.stringify(d.checks) !== JSON.stringify(state.checks)) {
+            state.checks = d.checks;
+            renderTree();
+          }
+        } catch (e) {}
+      };
+    } catch (e) {
+      // 极老浏览器不支持 SSE 时回退到轮询
+      setInterval(function () { if (state.current) loadChecks(state.current); }, 4000);
+    }
+  }
+
+  function selectPlayer(p) {
+    state.current = p;
+    renderTabs();
+    openEvents(p);
+    fetch("/api/tree?player=" + encodeURIComponent(p))
+      .then(function (r) { if (r.ok) return r.json(); throw new Error("load tree failed"); })
+      .then(function (tree) {
+        state.tree = tree;
+        state.collapsed = {};
+        state.checks = {};
+        renderTree();
+        loadChecks(p);
+      })
+      .catch(function () { state.tree = null; renderTree(); });
+  }
+
+  function loadPlayers() {
+    fetch("/api/players")
+      .then(function (r) { if (r.ok) return r.json(); throw new Error("load players failed"); })
+      .then(function (d) {
+        state.players = d.players || [];
+        var stillThere = state.players.indexOf(state.current) >= 0;
+        if (state.current == null || !stillThere) {
+          state.current = state.players.length ? state.players[0] : null;
+          renderTabs();
+          if (state.current) selectPlayer(state.current);
+          else renderTree();
+        } else {
+          renderTabs();
+        }
+      })
+      .catch(function () { renderTabs(); });
+  }
+
+  loadPlayers();
+  setInterval(loadPlayers, 10000); // 每 10 秒刷新玩家列表（只更新标签，不重载当前树）
+})();
+</script>
+</body>
+</html>
