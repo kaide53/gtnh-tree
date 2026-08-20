@@ -34,9 +34,10 @@ import codechicken.nei.guihook.GuiContainerManager;
  */
 public class IconExportScreen extends GuiScreen {
 
+    /** Minecraft 原生物品单位是 16px，这里作为基准；最终导出尺寸 = ICON_SIZE * 缩放倍率。 */
     private static final int ICON_SIZE = 16;
-    private static final int BORDER_SIZE = 1;
-    private static final int BOX_SIZE = ICON_SIZE + BORDER_SIZE * 2;
+    /** 1x 倍率下两个图标之间的间隙（像素），缩放后按倍率放大。 */
+    private static final int BASE_BORDER = 1;
 
     private final List<ItemStack> stacks;
     private final List<String> files;
@@ -79,42 +80,56 @@ public class IconExportScreen extends GuiScreen {
     }
 
     private void drawItems() {
+        int scale = ModConfig.getIconScale();
+        int box = (ICON_SIZE + BASE_BORDER * 2) * scale;
+
         Dimension d = GuiDraw.displayRes();
 
         GL11.glMatrixMode(GL11.GL_PROJECTION);
         GL11.glLoadIdentity();
-        GL11.glOrtho(0.0D, d.width * 16D / ICON_SIZE, d.height * 16D / ICON_SIZE, 0.0D, 1000.0D, 3000.0D);
+        // 1 个 GL 单位 = 1 个窗口像素
+        GL11.glOrtho(0.0D, d.width, d.height, 0.0D, 1000.0D, 3000.0D);
         GL11.glMatrixMode(GL11.GL_MODELVIEW);
         GL11.glClearColor(0, 0, 0, 0);
         GL11.glClear(GL11.GL_COLOR_BUFFER_BIT | GL11.GL_DEPTH_BUFFER_BIT);
 
-        int rows = d.height / BOX_SIZE;
-        int cols = d.width / BOX_SIZE;
+        int rows = d.height / box;
+        int cols = d.width / box;
         int fit = rows * cols;
 
         RenderHelper.enableGUIStandardItemLighting();
         GL11.glEnable(GL12.GL_RESCALE_NORMAL);
         GL11.glColor4f(1, 1, 1, 1);
 
+        // 在 16px 基准坐标下排版，再整体放大 scale 倍。
+        // 3D 方块物品会被真实地重新栅格化到更高分辨率；2D 扁平物品按最近邻放大（源纹理仍是 16px）。
+        GL11.glPushMatrix();
+        GL11.glScalef(scale, scale, 1.0F);
         for (int i = 0; drawIndex < stacks.size() && i < fit; drawIndex++, i++) {
-            int x = i % cols * 18;
-            int y = i / cols * 18;
-            GuiContainerManager.drawItem(x + BORDER_SIZE, y + BORDER_SIZE, stacks.get(drawIndex));
+            int x = i % cols * (ICON_SIZE + BASE_BORDER * 2);
+            int y = i / cols * (ICON_SIZE + BASE_BORDER * 2);
+            GuiContainerManager.drawItem(x + BASE_BORDER, y + BASE_BORDER, stacks.get(drawIndex));
         }
+        GL11.glPopMatrix();
 
         GL11.glFlush();
     }
 
     private void exportItems() throws IOException {
+        int scale = ModConfig.getIconScale();
+        int exportSize = ICON_SIZE * scale;
+        int border = BASE_BORDER * scale;
+        int box = exportSize + border * 2;
+
         BufferedImage img = screenshot();
-        int rows = img.getHeight() / BOX_SIZE;
-        int cols = img.getWidth() / BOX_SIZE;
+        int rows = img.getHeight() / box;
+        int cols = img.getWidth() / box;
         int fit = rows * cols;
 
         for (int i = 0; parseIndex < stacks.size() && i < fit; parseIndex++, i++) {
-            int x = i % cols * BOX_SIZE;
-            int y = i / cols * BOX_SIZE;
-            BufferedImage sub = img.getSubimage(x + BORDER_SIZE, y + BORDER_SIZE, ICON_SIZE, ICON_SIZE);
+            int x = i % cols * box;
+            int y = i / cols * box;
+            BufferedImage sub = img.getSubimage(x + border, y + border, exportSize, exportSize);
             ImageIO.write(sub, "png", new File(dir, files.get(parseIndex)));
         }
 

@@ -42,7 +42,7 @@ import codechicken.nei.recipe.Recipe.RecipeId;
  *   /treeexport <组ID>  只导出指定组
  *
  * 数据来自 NEI 的书签（BookmarkStorage），树的重建逻辑与 web/tools/bookmarks2tree.py 一致。
- * 每个物品会用游戏自身的渲染管线画成 16x16 PNG，存到 dumps/icons/，JSON 里通过 icon 字段引用。
+ * 每个物品会用游戏自身的渲染管线按配置的缩放倍率画成 PNG（默认 3x=48px），存到 dumps/icons/，JSON 里通过 icon 字段引用。
  */
 public class TreeExportCommand extends CommandBase {
 
