@@ -58,7 +58,7 @@
   .view-switch button.active { background: var(--accent); color: #07131a; box-shadow: 0 2px 8px rgba(79,195,247,.2); }
   .graph-toolbar { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; flex-wrap: wrap; }
   .graph-toolbar .hinttext { color: var(--muted); font-size: 12px; margin-left: 4px; }
-  .graph-viewport { position: relative; height: calc(100vh - 145px); min-height: 520px; overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background-color: #0d1218; background-image: linear-gradient(var(--graph-grid) 1px, transparent 1px), linear-gradient(90deg, var(--graph-grid) 1px, transparent 1px); background-size: 32px 32px; cursor: grab; user-select: none; touch-action: none; }
+  .graph-viewport { position: relative; height: calc(100vh - 145px); min-height: 520px; overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background-color: #0d1218; background-image: linear-gradient(var(--graph-grid) 1px, transparent 1px), linear-gradient(90deg, var(--graph-grid) 1px, transparent 1px); background-size: 32px 32px; cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: none; }
   .graph-viewport.dragging { cursor: grabbing; }
   .graph-stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
   .graph-links { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
@@ -723,21 +723,76 @@
 
   (function initGraphPanZoom() {
     var vp = document.getElementById("graphViewport");
-    var dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
+    var pointers = new Map();        // pointerId -> {x, y, sx, sy, ox, oy}
+    var pinchDist = 0, pinchScale = 1;
+
+    function isInteractive(e) {
+      var t = e.target;
+      return !!(t && t.closest && t.closest(".graph-toggle, .check"));
+    }
+
     vp.addEventListener("pointerdown", function (e) {
       // 点到展开/折叠按钮或完成勾选框时，不启动拖拽，让它们的 click 正常触发
-      var t = e.target;
-      if (t && t.closest && t.closest(".graph-toggle, .check")) return;
-      dragging = true; sx = e.clientX; sy = e.clientY; ox = state.tx; oy = state.ty;
-      vp.classList.add("dragging"); vp.setPointerCapture(e.pointerId);
+      if (isInteractive(e)) return;
+      vp.setPointerCapture(e.pointerId);
+      pointers.set(e.pointerId, {
+        x: e.clientX, y: e.clientY,
+        sx: e.clientX, sy: e.clientY,
+        ox: state.tx, oy: state.ty
+      });
+      if (pointers.size === 2) {
+        var a = Array.from(pointers.values());
+        pinchDist = Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y);
+        pinchScale = state.scale;
+      }
+      vp.classList.add("dragging");
     });
+
     vp.addEventListener("pointermove", function (e) {
-      if (!dragging) return;
-      state.tx = ox + e.clientX - sx; state.ty = oy + e.clientY - sy; applyGraphTransform();
+      var p = pointers.get(e.pointerId);
+      if (!p) return;
+      p.x = e.clientX; p.y = e.clientY;
+      if (pointers.size === 1) {
+        // 单指拖拽平移
+        state.tx = p.ox + (p.x - p.sx);
+        state.ty = p.oy + (p.y - p.sy);
+        applyGraphTransform();
+      } else if (pointers.size === 2) {
+        // 双指捏合缩放（以两指中点为锚点）
+        var a = Array.from(pointers.values());
+        var d = Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y);
+        if (pinchDist > 0) {
+          var factor = d / pinchDist;
+          var next = Math.max(0.35, Math.min(2.5, pinchScale * factor));
+          var rect = vp.getBoundingClientRect();
+          var cx = (a[0].x + a[1].x) / 2 - rect.left;
+          var cy = (a[0].y + a[1].y) / 2 - rect.top;
+          var wx = (cx - state.tx) / state.scale;
+          var wy = (cy - state.ty) / state.scale;
+          state.scale = next;
+          state.tx = cx - wx * next;
+          state.ty = cy - wy * next;
+          applyGraphTransform();
+        }
+      }
     });
-    function endDrag() { dragging = false; vp.classList.remove("dragging"); }
-    vp.addEventListener("pointerup", endDrag);
-    vp.addEventListener("pointercancel", endDrag);
+
+    function removePointer(e) {
+      pointers.delete(e.pointerId);
+      if (pointers.size === 0) {
+        vp.classList.remove("dragging");
+        pinchDist = 0;
+      } else if (pointers.size === 1) {
+        // 从双指捏合回到单指：以剩余指针作为新的平移起点
+        var p = Array.from(pointers.values())[0];
+        p.sx = p.x; p.sy = p.y;
+        p.ox = state.tx; p.oy = state.ty;
+        pinchDist = 0;
+      }
+    }
+    vp.addEventListener("pointerup", removePointer);
+    vp.addEventListener("pointercancel", removePointer);
+
     vp.addEventListener("wheel", function (e) {
       e.preventDefault();
       var rect = vp.getBoundingClientRect();
