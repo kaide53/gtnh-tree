@@ -7,6 +7,10 @@ mod/.gradle/
 mod/run/
 mod/*.log
 
+# 本地构建环境（JDK / Gradle 依赖缓存，体积大，不入库）
+mod/.gradle-home/
+mod/.jdks/
+
 # 本地离线查看器生成的临时数据（由 tools 脚本从游戏书签导出，不属于源码）
 web/tree.json
 web/tree-data.js
