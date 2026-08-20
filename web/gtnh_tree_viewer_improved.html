@@ -43,14 +43,6 @@
     padding: 6px 12px; cursor: pointer; font-size: 13px;
   }
   button:hover { border-color: var(--accent); color: #fff; }
-  .download { color: var(--accent); font-size: 13px; text-decoration: none; padding: 5px 12px;
-    border: 1px solid rgba(79,195,247,.4); border-radius: 6px; white-space: nowrap; }
-  .download:hover { background: rgba(79,195,247,.12); color: #fff; }
-  #tabs { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; width: 100%; }
-  .tab { padding: 5px 14px; border: 1px solid var(--border); border-radius: 999px;
-    cursor: pointer; color: var(--muted); font-size: 13px; user-select: none; }
-  .tab:hover { border-color: var(--accent); color: #fff; }
-  .tab.active { background: var(--accent); border-color: var(--accent); color: #0a0e12; font-weight: 600; }
   .dropzone { display: none; }
   #wrap { max-width: 1400px; margin: 0 auto; padding: 18px; }
   .view-switch { display: inline-flex; gap: 4px; padding: 3px; background: #11171d; border: 1px solid var(--border); border-radius: 8px; }
@@ -115,9 +107,6 @@
   }
   .amounts { margin-top: 3px; font-size: 12px; color: var(--muted); }
   .amounts .need { color: var(--warn); font-weight: 600; }
-  .group-badge { display: inline-block; margin-left: 2px; padding: 0 7px; font-size: 11px;
-    color: #9fd8ff; background: rgba(79,195,247,.12); border: 1px solid rgba(79,195,247,.3);
-    border-radius: 999px; vertical-align: 1px; line-height: 1.6; }
   .amounts .leaf-note { color: var(--leaf); }
   .amounts .leftover { color: #7f9dbb; }
   .children { margin-left: 22px; padding-left: 12px; border-left: 1px solid var(--line); }
@@ -132,8 +121,8 @@
 </head>
 <body>
 <header>
-  <h1>GTNH 合成树 · 多人共享</h1>
-  <span class="sub" id="subtitle">加载中…</span>
+  <h1>GTNH 合成树</h1>
+  <span class="sub" id="subtitle">数据源：bookmarks.ini（预览版）</span>
   <span class="spacer"></span>
   <div class="view-switch" title="切换合成树展示方式">
     <button id="listMode">列表树</button>
@@ -141,11 +130,15 @@
   </div>
   <button id="expandAll">全部展开</button>
   <button id="collapseAll">全部折叠</button>
-  <a class="download" href="gtnhtreeexport.jar" download title="下载导出模组（放进整合包 mods 文件夹）">⬇ 下载模组</a>
-  <div id="tabs"><span style="color:var(--muted); font-size:13px;">加载玩家中…</span></div>
+  <button id="openFile">打开 JSON…</button>
 </header>
+<input type="file" id="fileInput" accept=".json,application/json" style="display:none">
 
 <div id="wrap">
+  <div id="drop" class="hint" style="display:none">
+    <strong>把导出的 tree.json 拖到这里</strong>
+    或点右上角「打开 JSON…」选择文件
+  </div>
   <div id="meta" class="meta"></div>
   <div id="stat" class="stat"></div>
   <div id="tree" class="list-view hidden"></div>
@@ -169,46 +162,19 @@
   </div>
 </div>
 
+<script src="tree-data.js"></script>
 <script>
 (function () {
   "use strict";
 
-  var state = { data: null, collapsed: {}, mode: "graph", scale: 1, tx: 30, ty: 30,
-                players: [], current: null, checks: {} };
+  var state = { data: null, collapsed: {}, mode: "graph", scale: 1, tx: 30, ty: 30 };
 
-  // 每个节点的唯一键：用「从根到该节点的 id#数量 路径」，保证同一物品在不同树枝/不同树下的勾选互不影响
-  function assignNodeKeys(roots) {
-    function walk(n, path) {
-      var k = (path ? path + ">" : "") + n.id + "#" + n.amount;
-      n._k = k;
-      (n.children || []).forEach(function (c) { walk(c, k); });
-    }
-    roots.forEach(function (r) { walk(r, ""); });
+  // 完成勾选状态（本地浏览器记忆，按物品 id 存 localStorage）
+  function checkDone(id) {
+    try { return localStorage.getItem("gtnh-check:local:" + id) === "1"; } catch (e) { return false; }
   }
-
-  function nodeKey(node) {
-    return node._k || node.id;
-  }
-
-  // 完成勾选状态：以服务器为准（data/<玩家>-checks.json），本地 localStorage 做离线缓存
-  function checkDone(node) {
-    var k = nodeKey(node);
-    if (state.checks && k in state.checks) return !!state.checks[k];
-    try {
-      return localStorage.getItem("gtnh-check:" + (state.current || "_") + ":" + k) === "1";
-    } catch (e) { return false; }
-  }
-  function setDone(node, done) {
-    var k = nodeKey(node);
-    state.checks[k] = done;
-    try {
-      localStorage.setItem("gtnh-check:" + (state.current || "_") + ":" + k, done ? "1" : "0");
-    } catch (e) {}
-    fetch("/api/check", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ player: state.current, id: k, done: done })
-    }).catch(function () {});
+  function setDone(id, done) {
+    try { localStorage.setItem("gtnh-check:local:" + id, done ? "1" : "0"); } catch (e) {}
   }
 
   var HANDLER_NAMES = {
@@ -270,29 +236,10 @@
 
   function isLeaf(node) { return !node.recipe || !node.children.length; }
 
-  // 流体启发式判断（模组暂未导出流体标记；含这些关键词的名字视为流体）
-  function isFluid(node) {
-    var s = (node.name || "") + "|" + (node.id || "");
-    return /单元|Cell|流体|Fluid|Liquid|mB/.test(s);
-  }
-
-  // 数量分组：物品 64 个/组，流体 144mB/锭；超过一组时返回 "X组" 或 "X组+Y个/锭"
-  function groupInfo(node) {
-    var isF = isFluid(node);
-    var div = isF ? 144 : 64;
-    var big = isF ? "锭" : "组";
-    var small = isF ? "mB" : "个";
-    if (node.amount == null || node.amount <= div) return null;
-    var g = Math.floor(node.amount / div);
-    var r = node.amount % div;
-    return (r === 0) ? (g + big) : (g + big + "+" + r + small);
-  }
-
   function renderAmounts(node) {
     var div = el("div", "amounts");
-    var isF = isFluid(node);
     var parts = [];
-    parts.push("需要 " + node.amount + (isF ? " mB" : " 个"));
+    parts.push("需要 " + node.amount + " 个");
     if (node.perCraft != null && node.perCraft !== 1) parts.push("每次消耗 ×" + node.perCraft);
     if (node.recipe) {
       if (node.produces !== 1) parts.push("单次产出 ×" + node.produces);
@@ -301,13 +248,6 @@
     }
     if (node.missing > 0) parts.push("⚠ 还有 " + node.missing + " 格原料未记录");
     div.appendChild(el("span", "need", parts[0]));
-
-    var gi = groupInfo(node);
-    if (gi) {
-      div.appendChild(document.createTextNode(" "));
-      div.appendChild(el("span", "group-badge", gi));
-    }
-
     for (var i = 1; i < parts.length; i++) {
       div.appendChild(document.createTextNode(" · "));
       var span = el("span", "amounts-extra", parts[i]);
@@ -350,12 +290,12 @@
     body.appendChild(renderAmounts(node));
 
     // 完成勾选框（右侧）
-    var done = checkDone(node);
+    var done = checkDone(node.id);
     var check = el("span", "check" + (done ? " done" : ""), done ? "✅" : "□");
     check.title = "标记完成";
     check.addEventListener("click", function () {
-      var d = !checkDone(node);
-      setDone(node, d);
+      var d = !checkDone(node.id);
+      setDone(node.id, d);
       check.textContent = d ? "✅" : "□";
       check.classList.toggle("done", d);
       row.classList.toggle("done", d);
@@ -387,7 +327,7 @@
   }
 
   function createGraphNode(node, x, y) {
-    var wrap = el("div", "graph-node" + (checkDone(node) ? " done" : ""));
+    var wrap = el("div", "graph-node" + (checkDone(node.id) ? " done" : ""));
     wrap.style.left = x + "px";
     wrap.style.top = y + "px";
     wrap.dataset.nodeId = node.id;
@@ -407,13 +347,13 @@
     name.title = node.id;
     top.appendChild(name);
 
-    var done = checkDone(node);
+    var done = checkDone(node.id);
     var check = el("span", "check" + (done ? " done" : ""), done ? "✅" : "□");
     check.title = "标记完成";
     check.addEventListener("click", function (e) {
       e.stopPropagation();
-      var d = !checkDone(node);
-      setDone(node, d);
+      var d = !checkDone(node.id);
+      setDone(node.id, d);
       check.textContent = d ? "✅" : "□";
       check.classList.toggle("done", d);
       wrap.classList.toggle("done", d);
@@ -527,6 +467,7 @@
     treeEl.innerHTML = "";
     var metaEl = document.getElementById("meta");
     var statEl = document.getElementById("stat");
+    var dropEl = document.getElementById("drop");
     var subEl = document.getElementById("subtitle");
     var graphView = document.getElementById("graphView");
 
@@ -534,9 +475,11 @@
       treeEl.innerHTML = "";
       metaEl.innerHTML = "";
       statEl.innerHTML = "";
+      dropEl.style.display = "block";
       graphView.classList.add("hidden");
       return;
     }
+    dropEl.style.display = "none";
 
     var d = state.data;
     var meta = [];
@@ -571,7 +514,7 @@
   function countDone(roots) {
     var n = 0;
     (function walk(list) {
-      list.forEach(function (x) { if (checkDone(x)) n++; if (x.children) walk(x.children); });
+      list.forEach(function (x) { if (checkDone(x.id)) n++; if (x.children) walk(x.children); });
     })(roots);
     return n;
   }
@@ -593,97 +536,46 @@
     }
   }
 
-  // ---- 多玩家：玩家列表 / 选择玩家 / SSE 实时同步 ----
-  function renderTabs() {
-    var tabs = document.getElementById("tabs");
-    tabs.innerHTML = "";
-    if (!state.players.length) {
-      tabs.appendChild(el("span", null, "还没有玩家上传数据。"));
-      return;
-    }
-    state.players.forEach(function (p) {
-      var t = el("span", "tab" + (p === state.current ? " active" : ""), p);
-      t.addEventListener("click", function () { selectPlayer(p); });
-      tabs.appendChild(t);
-    });
-    var refresh = document.createElement("button");
-    refresh.textContent = "刷新";
-    refresh.style.marginLeft = "4px";
-    refresh.addEventListener("click", loadPlayers);
-    tabs.appendChild(refresh);
+  // 1) 双击打开时：tree-data.js 内嵌的数据
+  if (window.TREE_DATA) loadData(window.TREE_DATA);
+
+  // 2) 通过 http 提供时：自动拉取 tree.json
+  if (!state.data) {
+    fetch("tree.json")
+      .then(function (r) { if (r.ok) return r.json(); throw new Error("no tree.json"); })
+      .then(loadData)
+      .catch(function () { render(); });
   }
 
-  var es = null;
-  function openEvents(player) {
-    if (es) { es.close(); es = null; }
-    if (!player) return;
-    try {
-      es = new EventSource("/api/events?player=" + encodeURIComponent(player));
-      es.onmessage = function (ev) {
-        try {
-          var d = JSON.parse(ev.data);
-          if (d && d.checks && JSON.stringify(d.checks) !== JSON.stringify(state.checks)) {
-            state.checks = d.checks;
-            render();
-          }
-        } catch (e) {}
-      };
-    } catch (e) {
-      setInterval(function () { if (state.current) loadChecks(state.current); }, 4000);
-    }
-  }
+  // 3) 拖拽 / 文件选择
+  var fileInput = document.getElementById("fileInput");
+  document.getElementById("openFile").addEventListener("click", function () { fileInput.click(); });
+  fileInput.addEventListener("change", function () {
+    var f = fileInput.files && fileInput.files[0];
+    if (f) readFile(f);
+    fileInput.value = "";
+  });
 
-  function loadChecks(player) {
-    if (!player) return;
-    fetch("/api/checks?player=" + encodeURIComponent(player))
-      .then(function (r) { if (r.ok) return r.json(); throw new Error("load checks failed"); })
-      .then(function (d) {
-        var next = d.checks || {};
-        if (JSON.stringify(next) !== JSON.stringify(state.checks)) {
-          state.checks = next;
-          render();
-        }
-      })
-      .catch(function () {});
-  }
+  var dropEl = document.getElementById("drop");
+  ["dragenter", "dragover"].forEach(function (ev) {
+    dropEl.addEventListener(ev, function (e) { e.preventDefault(); dropEl.style.borderColor = "#4fc3f7"; });
+  });
+  ["dragleave", "drop"].forEach(function (ev) {
+    dropEl.addEventListener(ev, function (e) { e.preventDefault(); dropEl.style.borderColor = ""; });
+  });
+  dropEl.addEventListener("drop", function (e) {
+    var f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) readFile(f);
+  });
 
-  function selectPlayer(p) {
-    state.current = p;
-    renderTabs();
-    openEvents(p);
-    fetch("/api/tree?player=" + encodeURIComponent(p))
-      .then(function (r) { if (r.ok) return r.json(); throw new Error("load tree failed"); })
-      .then(function (tree) {
-        state.data = tree;
-        assignNodeKeys(tree.roots);
-        state.collapsed = {};
-        state.checks = {};
-        render();
-        loadChecks(p);
-      })
-      .catch(function () { state.data = null; render(); });
+  function readFile(f) {
+    var reader = new FileReader();
+    reader.onload = function () {
+      try { loadData(JSON.parse(reader.result)); }
+      catch (err) { alert("解析 JSON 失败：" + err.message); }
+    };
+    reader.readAsText(f, "utf-8");
   }
-
-  function loadPlayers() {
-    fetch("/api/players")
-      .then(function (r) { if (r.ok) return r.json(); throw new Error("load players failed"); })
-      .then(function (d) {
-        state.players = d.players || [];
-        var stillThere = state.players.indexOf(state.current) >= 0;
-        if (state.current == null || !stillThere) {
-          state.current = state.players.length ? state.players[0] : null;
-          renderTabs();
-          if (state.current) selectPlayer(state.current);
-          else render();
-        } else {
-          renderTabs();
-        }
-      })
-      .catch(function () { renderTabs(); });
-  }
-
-  loadPlayers();
-  setInterval(loadPlayers, 10000);
 
   document.getElementById("expandAll").addEventListener("click", function () {
     state.collapsed = {}; render();
